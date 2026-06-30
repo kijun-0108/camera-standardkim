@@ -1194,24 +1194,54 @@ async function exportAll() {
   try { shots = await dbGetAll(); } catch (e) { showHint('보관함 읽기 실패', 2400); return; }
   if (!shots || shots.length === 0) { showHint('내보낼 사진이 없습니다', 2000); return; }
   exporting = true;
-  showHint('내보내기 준비 중… (' + shots.length + '건)', 2500);
   try {
-    const files = [];
-    for (const s of shots) for (const f of s.files) files.push(f);
-    const zipBlob = await makeZip(files);
     const ts = new Date();
     const pad = n => String(n).padStart(2, '0');
     const stamp = ts.getFullYear() + pad(ts.getMonth()+1) + pad(ts.getDate()) + 'T' +
                   pad(ts.getHours()) + pad(ts.getMinutes()) + pad(ts.getSeconds());
-    const zipName = 'camera_export_' + shots.length + 'shots_' + stamp + '.zip';
+    const folderName = 'camera_' + stamp;
+    const files = [];
+    for (const s of shots) for (const f of s.files) files.push(f);
 
-    // Prefer the native share sheet — sends straight to KakaoTalk / Drive / email and
-    // works even while fullscreen. Single clean action, no extra confirm popup.
+    // Best path (desktop Chrome / supported browsers): write each photo + metadata
+    // individually into a real folder the user picks. Android Chrome does NOT support
+    // this API, so it falls through to the folder-structured ZIP below.
+    if (window.showDirectoryPicker) {
+      let dir = null;
+      try {
+        dir = await window.showDirectoryPicker({ mode: 'readwrite' });
+      } catch (e) {
+        if (e && e.name === 'AbortError') { showHint('취소됨', 1500); return; }
+      }
+      if (dir) {
+        const sub = await dir.getDirectoryHandle(folderName, { create: true });
+        let done = 0;
+        for (const f of files) {
+          const fh = await sub.getFileHandle(f.name, { create: true });
+          const w = await fh.createWritable();
+          await w.write(f.blob);
+          await w.close();
+          done++;
+          if (done % 2 === 0) showHint('저장 중… ' + (done / 2) + '/' + shots.length, 1000);
+        }
+        showHint('폴더 "' + folderName + '"에 ' + shots.length + '건 저장 완료 ✓ (비우려면 버튼 길게)', 5000);
+        return;
+      }
+    }
+
+    // Fallback (Android Chrome etc.): one ZIP whose contents are a single folder with
+    // each photo + its .json paired by name. Extract once → exactly that folder.
+    showHint('내보내기 준비 중… (' + shots.length + '건)', 2500);
+    const zipFiles = files.map(f => ({ name: folderName + '/' + f.name, blob: f.blob }));
+    const zipBlob = await makeZip(zipFiles);
+    const zipName = folderName + '.zip';
+
+    // Native share sheet — send to KakaoTalk / Drive / email; works while fullscreen.
     try {
       const file = new File([zipBlob], zipName, { type: 'application/zip' });
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         await navigator.share({ files: [file], title: zipName });
-        showHint('공유 완료 ✓ · 비우려면 내보내기 버튼을 길게 누르세요', 4500);
+        showHint('공유 완료 ✓ · 파일관리자에서 압축 풀면 폴더로 정리됨 (비우려면 버튼 길게)', 6000);
         return;
       }
     } catch (e) {
@@ -1219,15 +1249,15 @@ async function exportAll() {
       // any other error: fall through to download
     }
 
-    // Fallback: single ZIP download. Leave fullscreen first — Android Chrome drops
-    // downloads while the page is fullscreen.
+    // Single ZIP download. Leave fullscreen first — Android Chrome drops downloads
+    // while the page is fullscreen.
     try { if (document.fullscreenElement) await document.exitFullscreen(); } catch (e) {}
     const url = URL.createObjectURL(zipBlob);
     const a = document.createElement('a');
     a.href = url; a.download = zipName;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 30000);
-    showHint('ZIP 다운로드됨 · 내 파일 > Download 폴더 확인 (비우려면 버튼 길게)', 5000);
+    showHint('ZIP 다운로드됨 · 파일관리자에서 길게 눌러 "압축풀기" 하면 폴더로 정리됨', 6000);
   } catch (e) {
     alert('내보내기 오류: ' + (e && (e.message || e.name) || e));
   } finally {
