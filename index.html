@@ -1194,7 +1194,7 @@ async function exportAll() {
   try { shots = await dbGetAll(); } catch (e) { showHint('보관함 읽기 실패', 2400); return; }
   if (!shots || shots.length === 0) { showHint('내보낼 사진이 없습니다', 2000); return; }
   exporting = true;
-  showHint('내보내기 준비 중… (' + shots.length + '건)', 2000);
+  showHint('내보내기 준비 중… (' + shots.length + '건)', 2500);
   try {
     const files = [];
     for (const s of shots) for (const f of s.files) files.push(f);
@@ -1205,41 +1205,71 @@ async function exportAll() {
                   pad(ts.getHours()) + pad(ts.getMinutes()) + pad(ts.getSeconds());
     const zipName = 'camera_export_' + shots.length + 'shots_' + stamp + '.zip';
 
-    // Prefer the native share sheet (lets you save to Files/Drive even in fullscreen);
-    // fall back to a single file download.
-    let handled = false;
+    // Prefer the native share sheet — sends straight to KakaoTalk / Drive / email and
+    // works even while fullscreen. Single clean action, no extra confirm popup.
     try {
       const file = new File([zipBlob], zipName, { type: 'application/zip' });
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         await navigator.share({ files: [file], title: zipName });
-        handled = true;
+        showHint('공유 완료 ✓ · 비우려면 내보내기 버튼을 길게 누르세요', 4500);
+        return;
       }
     } catch (e) {
-      if (e && e.name === 'AbortError') handled = true; // user cancelled — don't double-save
-    }
-    if (!handled) {
-      const url = URL.createObjectURL(zipBlob);
-      const a = document.createElement('a');
-      a.href = url; a.download = zipName;
-      document.body.appendChild(a); a.click(); document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 15000);
+      if (e && e.name === 'AbortError') { showHint('공유 취소됨', 1800); return; }
+      // any other error: fall through to download
     }
 
-    setTimeout(() => {
-      if (confirm('내보내기 완료 (' + shots.length + '건).\n저장/공유가 끝난 걸 확인했다면 앱 보관함을 비울까요?')) {
-        dbClear().then(updateExportBadge);
-      }
-    }, 700);
+    // Fallback: single ZIP download. Leave fullscreen first — Android Chrome drops
+    // downloads while the page is fullscreen.
+    try { if (document.fullscreenElement) await document.exitFullscreen(); } catch (e) {}
+    const url = URL.createObjectURL(zipBlob);
+    const a = document.createElement('a');
+    a.href = url; a.download = zipName;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+    showHint('ZIP 다운로드됨 · 내 파일 > Download 폴더 확인 (비우려면 버튼 길게)', 5000);
   } catch (e) {
-    showHint('내보내기 실패: ' + (e.message || e.name), 3500);
+    alert('내보내기 오류: ' + (e && (e.message || e.name) || e));
   } finally {
     exporting = false;
   }
 }
 
+// Long-press the export button to clear the in-app storage (kept separate from export
+// so a stray tap never deletes shots).
+let exportLongPressed = false;
+function setupExportLongPress() {
+  const btn = document.getElementById('btn-export');
+  let timer = null;
+  const start = () => {
+    timer = setTimeout(async () => {
+      timer = null;
+      exportLongPressed = true;
+      let n = 0;
+      try { n = await dbCount(); } catch (e) {}
+      if (n === 0) { showHint('보관함이 이미 비어있습니다', 1800); return; }
+      if (confirm('앱 보관함의 ' + n + '건을 모두 삭제할까요?\n(내보낸 파일이 저장된 걸 확인한 뒤 삭제하세요)')) {
+        try { await dbClear(); await updateExportBadge(); showHint('보관함을 비웠습니다', 2000); }
+        catch (e) { showHint('비우기 실패', 2000); }
+      }
+    }, 700);
+  };
+  const cancel = () => { if (timer) { clearTimeout(timer); timer = null; } };
+  btn.addEventListener('touchstart', start, { passive: true });
+  btn.addEventListener('touchend', cancel);
+  btn.addEventListener('touchmove', cancel, { passive: true });
+  btn.addEventListener('mousedown', start);
+  btn.addEventListener('mouseup', cancel);
+  btn.addEventListener('mouseleave', cancel);
+}
+
 // ===== Wire up =====
 startBtn.addEventListener('click', startCamera);
-document.getElementById('btn-export').addEventListener('click', exportAll);
+document.getElementById('btn-export').addEventListener('click', () => {
+  if (exportLongPressed) { exportLongPressed = false; return; } // long-press handled clear
+  exportAll();
+});
+setupExportLongPress();
 updateExportBadge();
 shutter.addEventListener('click', () => {
   if (captureMode === 'photo') {
