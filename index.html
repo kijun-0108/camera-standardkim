@@ -1,0 +1,1311 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#000000">
+<link rel="manifest" href="/manifest.json">
+<title>Dongdaemun Camera</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #000; color: #fff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", sans-serif; user-select: none; -webkit-user-select: none; }
+
+/* Permission gate */
+#gate { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 32px; background: #000; z-index: 100; }
+#gate h1 { font-size: 18px; font-weight: 500; margin-bottom: 8px; letter-spacing: 0.02em; }
+#gate p { font-size: 13px; color: rgba(255,255,255,0.6); text-align: center; line-height: 1.6; max-width: 280px; margin-bottom: 32px; }
+#gate button { background: #5DCAA5; color: #0e2e25; border: none; padding: 14px 32px; border-radius: 10px; font-size: 14px; font-weight: 500; cursor: pointer; }
+#gate button:active { transform: scale(0.97); }
+#gate .err { color: #ff6b6b; font-size: 12px; margin-top: 16px; max-width: 280px; text-align: center; line-height: 1.5; }
+
+/* Camera stage */
+#stage { position: fixed; inset: 0; display: none; }
+#video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+#guide { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+
+/* HUD */
+#hud { position: absolute; inset: 0; pointer-events: none; }
+.hud-top { position: absolute; top: 12px; left: 12px; right: 12px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.hud-pill { background: rgba(0,0,0,0.55); padding: 6px 10px; border-radius: 4px; font-size: 10px; font-family: ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: 0.04em; }
+.hud-level { background: rgba(0,0,0,0.55); padding: 6px 12px; border-radius: 4px; display: flex; align-items: center; gap: 8px; font-size: 10px; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+.level-track { width: 60px; height: 1px; background: rgba(255,255,255,0.25); position: relative; }
+.level-dot { position: absolute; top: -2px; width: 5px; height: 5px; border-radius: 50%; background: #5DCAA5; left: 50%; transform: translateX(-50%); transition: left 0.08s linear, background 0.15s linear; }
+.level-dot.off { background: #ff9a3b; }
+#level-val { min-width: 32px; text-align: right; }
+
+.hud-bottom { position: absolute; bottom: 24px; left: 0; right: 0; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+#rec-info { font-size: 11px; font-family: ui-monospace, "SF Mono", Menlo, monospace; background: rgba(0,0,0,0.55); padding: 6px 12px; border-radius: 4px; display: flex; align-items: center; gap: 8px; opacity: 0; transition: opacity 0.2s; }
+#rec-info.on { opacity: 1; }
+.rec-dot { width: 7px; height: 7px; border-radius: 50%; background: #ff3b3b; animation: pulse 1s infinite; }
+@keyframes pulse { 50% { opacity: 0.3; } }
+
+#shutter { width: 68px; height: 68px; border-radius: 50%; border: 3px solid #fff; background: rgba(255,255,255,0.15); pointer-events: auto; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: transform 0.1s; }
+#shutter:active { transform: scale(0.93); }
+#shutter::before { content: ""; width: 50px; height: 50px; border-radius: 50%; background: #fff; transition: all 0.2s; }
+#shutter.recording::before { width: 22px; height: 22px; border-radius: 4px; background: #ff3b3b; }
+
+/* Capture mode toggle (video / photo) */
+.mode-toggle { display: flex; background: rgba(0,0,0,0.55); border-radius: 6px; padding: 3px; gap: 2px; pointer-events: auto; }
+.mode-btn { background: transparent; border: none; color: rgba(255,255,255,0.6); font-size: 12px; font-weight: 500; padding: 6px 18px; border-radius: 4px; cursor: pointer; transition: background 0.2s, color 0.2s; font-family: inherit; }
+.mode-btn.active { background: #5DCAA5; color: #0e2e25; }
+
+/* Photo capture flash */
+#flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; z-index: 10; }
+#flash.on { animation: flashAnim 0.35s ease-out; }
+@keyframes flashAnim { 0% { opacity: 0.9; } 100% { opacity: 0; } }
+
+.hud-top-right { display: flex; align-items: center; gap: 8px; }
+.hud-icon { background: rgba(0,0,0,0.55); border: none; border-radius: 4px; width: 28px; height: 28px; display: none; align-items: center; justify-content: center; padding: 0; cursor: pointer; pointer-events: auto; }
+.hud-icon:active { transform: scale(0.93); }
+.hud-icon svg { width: 16px; height: 16px; }
+
+#btn-export { display: flex; align-items: center; gap: 6px; background: rgba(93,202,165,0.92); color: #0e2e25; border: none; padding: 6px 10px; border-radius: 4px; font-size: 10px; font-weight: 600; font-family: inherit; letter-spacing: 0.02em; pointer-events: auto; cursor: pointer; }
+#btn-export:active { transform: scale(0.95); }
+.export-badge { background: #0e2e25; color: #5DCAA5; border-radius: 8px; padding: 1px 6px; min-width: 16px; text-align: center; font-size: 10px; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+
+/* Hint flash */
+#hint { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.7); padding: 10px 16px; border-radius: 6px; font-size: 12px; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
+#hint.on { opacity: 1; }
+
+/* Type / District select screens */
+#type-select, #district-select { position: fixed; inset: 0; background: #0e0e0d; display: none; flex-direction: column; padding: 20px 28px; z-index: 50; overflow: hidden; }
+.screen-header h1 { font-size: 18px; font-weight: 500; margin-bottom: 4px; letter-spacing: 0.02em; }
+.screen-header .subtitle { font-size: 12px; color: rgba(255,255,255,0.5); margin-bottom: 16px; line-height: 1.5; }
+
+.type-grid { flex: 1; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr 1fr; gap: 8px; min-height: 0; }
+.type-card { background: rgba(255,255,255,0.04); border: 0.5px solid rgba(255,255,255,0.15); border-radius: 8px; padding: 10px 12px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s, border-color 0.2s, transform 0.15s; min-width: 0; overflow: hidden; }
+.type-card:active { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.25); transform: scale(0.98); }
+.type-card-wide { grid-column: 1 / 3; }
+.type-card svg { width: 56px; height: 40px; flex-shrink: 0; }
+.type-card .info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.type-card .name { font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.type-card .subtitle { font-size: 10px; color: rgba(255,255,255,0.5); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.district-pill { align-self: flex-start; background: rgba(93,202,165,0.12); color: #5DCAA5; padding: 4px 10px; border-radius: 4px; font-size: 10px; font-family: ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: 0.04em; margin-bottom: 14px; }
+.district-list { display: flex; flex-direction: column; gap: 8px; }
+.district-card { background: rgba(255,255,255,0.04); border: 0.5px solid rgba(255,255,255,0.15); border-radius: 8px; padding: 12px 14px; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: background 0.2s, transform 0.15s; }
+.district-card:active { background: rgba(255,255,255,0.08); transform: scale(0.98); }
+.district-card .pin { width: 18px; height: 18px; flex-shrink: 0; opacity: 0.85; }
+.district-card .info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.district-card .name { font-size: 13px; font-weight: 500; }
+.district-card .subtitle { font-size: 11px; color: rgba(255,255,255,0.5); }
+
+.back-btn { margin-top: auto; align-self: flex-start; background: transparent; border: none; color: rgba(255,255,255,0.6); font-size: 13px; padding: 8px 4px; cursor: pointer; transition: color 0.2s; }
+.back-btn:active { color: #fff; }
+
+#type-pill { cursor: pointer; pointer-events: auto; }
+#gps-indicator { font-size: 10px; transition: color 0.2s; }
+#gps-indicator.ok { color: #5DCAA5; }
+#gps-indicator.fail { color: rgba(255,255,255,0.4); }
+</style>
+</head>
+<body>
+
+<!-- ===== Permission Gate ===== -->
+<div id="gate">
+<h1>Dongdaemun Camera</h1>
+<p>건물 정면 촬영을 위한 가이드 카메라.<br>카메라 권한이 필요합니다.</p>
+<button id="btn-start">시작</button>
+<div id="gate-err" class="err"></div>
+</div>
+
+<!-- ===== Type Select ===== -->
+<div id="type-select">
+<div class="screen-header">
+<h1>촬영할 건물의 형태</h1>
+<div class="subtitle">건물의 매스에 가장 가까운 유형을 선택</div>
+</div>
+<div class="type-grid" id="type-grid"></div>
+</div>
+
+<!-- ===== District Select ===== -->
+<div id="district-select">
+<div class="district-pill" id="district-type-pill"></div>
+<div class="screen-header">
+<h1>촬영 지역</h1>
+<div class="subtitle">현재 촬영하는 위치를 선택</div>
+</div>
+<div class="district-list" id="district-list"></div>
+<button class="back-btn" id="btn-back-to-types">← 뒤로</button>
+</div>
+
+<!-- ===== Camera Stage ===== -->
+<div id="stage">
+<video id="video" autoplay playsinline muted></video>
+<svg id="guide" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg"></svg>
+<div id="flash"></div>
+
+<div id="hud">
+<div class="hud-top">
+<div class="hud-pill" id="type-pill">TYPE 1 · 16:9</div>
+<div class="hud-top-right">
+<button id="btn-fullscreen" class="hud-icon" aria-label="전체화면 복귀">
+<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+<polyline points="5,2 2,2 2,5"/>
+<polyline points="11,2 14,2 14,5"/>
+<polyline points="14,11 14,14 11,14"/>
+<polyline points="2,11 2,14 5,14"/>
+</svg>
+</button>
+<button id="btn-export" aria-label="내보내기"><span>⤓ 내보내기</span><span class="export-badge" id="export-count">0</span></button>
+<span class="hud-pill fail" id="gps-indicator">GPS ✗</span>
+<div class="hud-level">
+<span>tilt</span>
+<div class="level-track"><div class="level-dot" id="level-dot"></div></div>
+<span id="level-val">0.0°</span>
+</div>
+</div>
+</div>
+
+<div class="hud-bottom">
+<div id="rec-info"><div class="rec-dot"></div><span id="rec-time">00:00 / 00:20</span></div>
+<div id="mode-toggle" class="mode-toggle">
+<button class="mode-btn active" data-mode="video">동영상</button>
+<button class="mode-btn" data-mode="photo">사진</button>
+</div>
+<div id="shutter"></div>
+</div>
+</div>
+
+<div id="hint"></div>
+</div>
+
+<script>
+// ===== State =====
+const RECORD_SECONDS = 20;
+let stream = null;
+let recorder = null;
+let chunks = [];
+let recording = false;
+let recStart = 0;
+let recInterval = null;
+let currentGuide = null;
+let currentType = null;
+let currentDistrict = null;
+let captureMode = 'video';
+let currentTilt = null;
+let tiltSamples = [];
+let lastRecDurationSec = 0;
+let lastStopReason = null;
+const sessionId = 'session_' + Math.random().toString(36).slice(2, 10);
+let shotIndex = 0;
+const APP_VERSION = 'phase_2.4';
+
+let currentLocation = null;
+let locationStatus = 'unknown';
+let gpsHintShown = false;
+
+let audioContext = null;
+let analyser = null;
+let audioSource = null;
+let audioSamples = [];
+let audioInterval = null;
+
+const DISTRICTS = {
+  dongdaemun: { id: 'dongdaemun', name: '동대문 일대', subtitle: '밀리오레 · APM · 굿모닝시티 · 두타' },
+  middle:     { id: 'middle',     name: '중간 구간',   subtitle: '동대문~신당 사이 가로 · 골목 건물' },
+  sindang:    { id: 'sindang',    name: '신당 일대',   subtitle: '중앙시장 · 신당역 인근 저층 · 시장 가옥' }
+};
+
+// ===== Guide rendering =====
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const VIEWBOX = { w: 1920, h: 1080 };
+
+const ASPECT_MASKS = {
+  cinemascope_2_39: { ratio: 2.39 }
+};
+
+const GUIDE_TYPES = {
+  type1: {
+    id: 'type1',
+    name: '가로형',
+    subtitle: '밀리오레 · APM',
+    aspectMask: 'cinemascope_2_39',
+    tiltTolerance: 1.0,
+    building: { x: 480, width: 960, y: 352, height: 400 },
+    lifeZone: { y: 780 }
+  },
+  type2: {
+    id: 'type2',
+    name: '박스형',
+    subtitle: '굿모닝시티',
+    aspectMask: 'cinemascope_2_39',
+    tiltTolerance: 1.0,
+    building: { x: 576, width: 768, y: 288, height: 512 },
+    lifeZone: { y: 800 }
+  },
+  type3: {
+    id: 'type3',
+    name: '타워형',
+    subtitle: '두타',
+    aspectMask: 'cinemascope_2_39',
+    tiltTolerance: 1.0,
+    building: { x: 825, width: 270, y: 200, height: 640 },
+    lifeZone: { y: 840 }
+  },
+  type4: {
+    id: 'type4',
+    name: '저층 가로형',
+    subtitle: '저층 도시 조직',
+    aspectMask: 'cinemascope_2_39',
+    tiltTolerance: 1.0,
+    building: { x: 768, width: 384, y: 540, height: 260 },
+    lifeZone: { y: 800 },
+    contextDividers: true
+  },
+  type5: {
+    id: 'type5',
+    name: '근경',
+    subtitle: '1층 표면 · 시장',
+    aspectMask: 'cinemascope_2_39',
+    tiltTolerance: 0.5,
+    building: { x: 0, width: 1920, y: 420, height: 380 },
+    lifeZone: { y: 830 },
+    bracketStyle: 'fullOutline',
+    facadeBoundary: { y: 420 },
+    eyeLevel: { y: 580, label: 'eye-level (1.5m)' }
+  }
+};
+
+function svgEl(tag, attrs) {
+  const e = document.createElementNS(SVG_NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  return e;
+}
+
+function drawGuide(typeId) {
+  const spec = GUIDE_TYPES[typeId];
+  currentGuide = spec;
+  const svg = document.getElementById('guide');
+  const VW = VIEWBOX.w, VH = VIEWBOX.h;
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+
+  const mask = ASPECT_MASKS[spec.aspectMask];
+  const maskH = Math.round((VH - VW / mask.ratio) / 2);
+  const maskTop = maskH;
+  const maskBottom = VH - maskH;
+  const visibleH = VH - 2 * maskH;
+  svg.appendChild(svgEl('rect', { x: 0, y: 0, width: VW, height: maskH, fill: '#000', opacity: 0.78 }));
+  svg.appendChild(svgEl('rect', { x: 0, y: maskBottom, width: VW, height: maskH, fill: '#000', opacity: 0.78 }));
+  svg.appendChild(svgEl('line', { x1: 0, y1: maskTop, x2: VW, y2: maskTop, stroke: '#fff', 'stroke-width': 2, 'stroke-opacity': 0.5 }));
+  svg.appendChild(svgEl('line', { x1: 0, y1: maskBottom, x2: VW, y2: maskBottom, stroke: '#fff', 'stroke-width': 2, 'stroke-opacity': 0.5 }));
+
+  const bx = spec.building.x;
+  const by = spec.building.y;
+  const bw = spec.building.width;
+  const bh = spec.building.height;
+  const bx2 = bx + bw, by2 = by + bh;
+  const buildingGroup = svgEl('g', { stroke: '#ffffff', 'stroke-width': 6, 'stroke-linecap': 'square', fill: 'none' });
+  if (spec.bracketStyle === 'fullOutline') {
+    buildingGroup.appendChild(svgEl('rect', { x: bx, y: by, width: bw, height: bh }));
+  } else {
+    const leg = 56;
+    buildingGroup.appendChild(svgEl('polyline', { points: `${bx},${by + leg} ${bx},${by} ${bx + leg},${by}` }));
+    buildingGroup.appendChild(svgEl('polyline', { points: `${bx2},${by + leg} ${bx2},${by} ${bx2 - leg},${by}` }));
+    buildingGroup.appendChild(svgEl('polyline', { points: `${bx},${by2 - leg} ${bx},${by2} ${bx + leg},${by2}` }));
+    buildingGroup.appendChild(svgEl('polyline', { points: `${bx2},${by2 - leg} ${bx2},${by2} ${bx2 - leg},${by2}` }));
+  }
+  svg.appendChild(buildingGroup);
+
+  const margins = svgEl('g', { stroke: '#ffffff', 'stroke-width': 2, 'stroke-opacity': 0.4, 'stroke-dasharray': '4,8', fill: 'none' });
+  margins.appendChild(svgEl('line', { x1: bx, y1: 200, x2: bx, y2: 880 }));
+  margins.appendChild(svgEl('line', { x1: bx2, y1: 200, x2: bx2, y2: 880 }));
+  svg.appendChild(margins);
+
+  if (spec.contextDividers) {
+    const dividers = svgEl('g', { stroke: '#ffffff', 'stroke-width': 2, 'stroke-opacity': 0.55, 'stroke-dasharray': '10,8', fill: 'none' });
+    dividers.appendChild(svgEl('line', { x1: bx, y1: maskTop, x2: bx, y2: maskBottom }));
+    dividers.appendChild(svgEl('line', { x1: bx2, y1: maskTop, x2: bx2, y2: maskBottom }));
+    svg.appendChild(dividers);
+  }
+
+  if (spec.facadeBoundary) {
+    svg.appendChild(svgEl('line', {
+      x1: 0, y1: spec.facadeBoundary.y, x2: VW, y2: spec.facadeBoundary.y,
+      stroke: '#fff', 'stroke-width': 2, 'stroke-opacity': 0.7, 'stroke-dasharray': '12,8'
+    }));
+  }
+
+  const lifeY = spec.lifeZone.y;
+  svg.appendChild(svgEl('line', { x1: 0, y1: lifeY, x2: VW, y2: lifeY, stroke: '#fff', 'stroke-width': 2, 'stroke-opacity': 0.55, 'stroke-dasharray': '8,12' }));
+  svg.appendChild(svgEl('line', { id: 'life-line', x1: 0, y1: lifeY, x2: VW, y2: lifeY, stroke: '#5DCAA5', 'stroke-width': 3, 'stroke-opacity': 0.85, 'stroke-dasharray': '16,12' }));
+
+  if (spec.eyeLevel) {
+    const eyeY = spec.eyeLevel.y;
+    svg.appendChild(svgEl('line', {
+      x1: 0, y1: eyeY, x2: VW, y2: eyeY,
+      stroke: '#5DCAA5', 'stroke-width': 4, 'stroke-opacity': 0.85, 'stroke-dasharray': '20,10'
+    }));
+    if (spec.eyeLevel.label) {
+      const text = svgEl('text', {
+        x: VW - 24, y: eyeY - 14,
+        fill: '#5DCAA5', 'font-size': 22, 'font-family': 'ui-monospace, "SF Mono", Menlo, monospace',
+        'text-anchor': 'end', 'fill-opacity': 0.95
+      });
+      text.textContent = spec.eyeLevel.label;
+      svg.appendChild(text);
+    }
+  }
+
+  svg.appendChild(svgEl('line', { id: 'center-axis', x1: VW / 2, y1: maskTop, x2: VW / 2, y2: maskBottom, stroke: '#fff', 'stroke-width': 2, 'stroke-opacity': 0.4, 'stroke-dasharray': '6,16' }));
+
+  const third1 = Math.round(maskTop + visibleH / 3);
+  const third2 = Math.round(maskTop + 2 * visibleH / 3);
+  svg.appendChild(svgEl('line', { x1: 0, y1: third1, x2: VW, y2: third1, stroke: '#fff', 'stroke-width': 1.5, 'stroke-opacity': 0.22, 'stroke-dasharray': '3,16' }));
+  svg.appendChild(svgEl('line', { x1: 0, y1: third2, x2: VW, y2: third2, stroke: '#fff', 'stroke-width': 1.5, 'stroke-opacity': 0.22, 'stroke-dasharray': '3,16' }));
+
+  const cx = VW / 2, cy = VH / 2;
+  const reticle = svgEl('g', { stroke: '#ffffff', 'stroke-width': 3, 'stroke-opacity': 0.7, fill: 'none' });
+  reticle.appendChild(svgEl('circle', { cx, cy, r: 14 }));
+  reticle.appendChild(svgEl('line', { x1: cx - 26, y1: cy, x2: cx - 14, y2: cy }));
+  reticle.appendChild(svgEl('line', { x1: cx + 14, y1: cy, x2: cx + 26, y2: cy }));
+  reticle.appendChild(svgEl('line', { x1: cx, y1: cy - 26, x2: cx, y2: cy - 14 }));
+  reticle.appendChild(svgEl('line', { x1: cx, y1: cy + 14, x2: cx, y2: cy + 26 }));
+  svg.appendChild(reticle);
+}
+
+// ===== Pictograms =====
+const PICTOGRAMS = {
+  type1: () => [
+    svgEl('rect', { x: 8, y: 14, width: 64, height: 28 }),
+    svgEl('line', { x1: 8, y1: 23, x2: 72, y2: 23 }),
+    svgEl('line', { x1: 8, y1: 32, x2: 72, y2: 32 })
+  ],
+  type2: () => [
+    svgEl('polyline', { points: '22,16 22,48 58,48 58,16' }),
+    svgEl('line', { x1: 22, y1: 16, x2: 58, y2: 16, 'stroke-dasharray': '3,2' }),
+    svgEl('line', { x1: 22, y1: 27, x2: 58, y2: 27 }),
+    svgEl('line', { x1: 22, y1: 38, x2: 58, y2: 38 }),
+    svgEl('line', { x1: 40, y1: 16, x2: 40, y2: 48 })
+  ],
+  type3: () => [
+    svgEl('rect', { x: 36, y: 8, width: 8, height: 40 }),
+    svgEl('rect', { x: 18, y: 32, width: 14, height: 16 }),
+    svgEl('rect', { x: 48, y: 32, width: 14, height: 16 })
+  ],
+  type4: () => [
+    svgEl('rect', { x: 32, y: 22, width: 16, height: 22 }),
+    svgEl('rect', { x: 14, y: 30, width: 12, height: 14 }),
+    svgEl('rect', { x: 54, y: 30, width: 12, height: 14 })
+  ],
+  type5: () => [
+    svgEl('rect', { x: 4, y: 24, width: 72, height: 18 }),
+    svgEl('line', { x1: 16, y1: 24, x2: 16, y2: 42 }),
+    svgEl('line', { x1: 28, y1: 24, x2: 28, y2: 42 }),
+    svgEl('line', { x1: 40, y1: 24, x2: 40, y2: 42 }),
+    svgEl('line', { x1: 52, y1: 24, x2: 52, y2: 42 }),
+    svgEl('line', { x1: 64, y1: 24, x2: 64, y2: 42 })
+  ]
+};
+
+function pinIcon() {
+  const svg = svgEl('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: '#fff', 'stroke-width': 1.5, 'stroke-linejoin': 'round', class: 'pin' });
+  svg.appendChild(svgEl('path', { d: 'M12 22 C12 22 5 14 5 9 C5 5 8 2 12 2 C16 2 19 5 19 9 C19 14 12 22 12 22 Z' }));
+  svg.appendChild(svgEl('circle', { cx: 12, cy: 9, r: 2.5 }));
+  return svg;
+}
+
+// ===== Screen flow =====
+function showScreen(id) {
+  const displays = { gate: 'flex', 'type-select': 'flex', 'district-select': 'flex', stage: 'block' };
+  for (const s in displays) {
+    const el = document.getElementById(s);
+    if (!el) continue;
+    el.style.display = (s === id) ? displays[s] : 'none';
+  }
+}
+
+function selectType(typeId) {
+  currentType = typeId;
+  const pill = document.getElementById('district-type-pill');
+  pill.textContent = '● TYPE ' + typeId.slice(4) + ' · ' + GUIDE_TYPES[typeId].name;
+  showScreen('district-select');
+}
+
+function selectDistrict(districtId) {
+  currentDistrict = districtId;
+  drawGuide(currentType);
+  updateTypePill();
+  showScreen('stage');
+}
+
+function updateTypePill() {
+  const pill = document.getElementById('type-pill');
+  if (!pill || !currentType) return;
+  const districtPart = currentDistrict ? currentDistrict.toUpperCase() : '';
+  pill.textContent = 'TYPE ' + currentType.slice(4) + ' · ' + districtPart;
+}
+
+// ===== Card builders =====
+function buildTypeCards() {
+  const container = document.getElementById('type-grid');
+  container.innerHTML = '';
+  ['type1', 'type2', 'type3', 'type4', 'type5'].forEach(id => {
+    const spec = GUIDE_TYPES[id];
+    const card = document.createElement('div');
+    card.className = 'type-card' + (id === 'type5' ? ' type-card-wide' : '');
+    const svg = svgEl('svg', { viewBox: '0 0 80 56', fill: 'none', stroke: '#fff', 'stroke-width': 1.2, 'stroke-linejoin': 'miter' });
+    PICTOGRAMS[id]().forEach(el => svg.appendChild(el));
+    card.appendChild(svg);
+    const info = document.createElement('div');
+    info.className = 'info';
+    const name = document.createElement('div');
+    name.className = 'name';
+    name.textContent = 'Type ' + id.slice(4) + ' · ' + spec.name;
+    const subtitle = document.createElement('div');
+    subtitle.className = 'subtitle';
+    subtitle.textContent = spec.subtitle;
+    info.appendChild(name);
+    info.appendChild(subtitle);
+    card.appendChild(info);
+    card.addEventListener('click', () => selectType(id));
+    container.appendChild(card);
+  });
+}
+
+function buildDistrictCards() {
+  const container = document.getElementById('district-list');
+  container.innerHTML = '';
+  ['dongdaemun', 'middle', 'sindang'].forEach(id => {
+    const spec = DISTRICTS[id];
+    const card = document.createElement('div');
+    card.className = 'district-card';
+    card.appendChild(pinIcon());
+    const info = document.createElement('div');
+    info.className = 'info';
+    const name = document.createElement('div');
+    name.className = 'name';
+    name.textContent = spec.name;
+    const subtitle = document.createElement('div');
+    subtitle.className = 'subtitle';
+    subtitle.textContent = spec.subtitle;
+    info.appendChild(name);
+    info.appendChild(subtitle);
+    card.appendChild(info);
+    card.addEventListener('click', () => selectDistrict(id));
+    container.appendChild(card);
+  });
+}
+
+// ===== Permission gate =====
+const gate = document.getElementById('gate');
+const stage = document.getElementById('stage');
+const startBtn = document.getElementById('btn-start');
+const gateErr = document.getElementById('gate-err');
+const video = document.getElementById('video');
+const shutter = document.getElementById('shutter');
+const recInfo = document.getElementById('rec-info');
+const recTime = document.getElementById('rec-time');
+const levelDot = document.getElementById('level-dot');
+const levelVal = document.getElementById('level-val');
+const hint = document.getElementById('hint');
+const btnFullscreen = document.getElementById('btn-fullscreen');
+
+function showHint(msg, ms = 1800) {
+  hint.textContent = msg;
+  hint.classList.add('on');
+  setTimeout(() => hint.classList.remove('on'), ms);
+}
+
+// ===== Camera start =====
+async function startCamera() {
+  gateErr.textContent = '';
+  // Fire fullscreen request immediately, before any await consumes the user gesture
+  const fsPromise = requestFullscreenSafe();
+  try {
+    // Request landscape 1920x1080 from rear camera
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+        aspectRatio: { ideal: 16/9 }
+      },
+      audio: true
+    });
+    video.srcObject = stream;
+    await video.play();
+    setupAudioAnalysis();
+    requestOrientation();
+    requestLocation();
+    await fsPromise;
+    lockOrientationLandscape();
+    showScreen('type-select');
+    history.pushState({ trap: true }, '');
+    window.addEventListener('popstate', onPopState);
+  } catch (e) {
+    gateErr.textContent = '카메라 접근 실패: ' + (e.message || e.name) + '\n주소창의 자물쇠 아이콘에서 권한을 확인해주세요.';
+  }
+}
+
+async function requestFullscreenSafe() {
+  try {
+    if (document.documentElement.requestFullscreen) {
+      await document.documentElement.requestFullscreen();
+    }
+  } catch (e) {
+    // User denied, browser unsupported, or already fullscreen — ignore
+  }
+}
+
+// ===== Lock orientation (best-effort) =====
+async function lockOrientationLandscape() {
+  try {
+    if (screen.orientation && screen.orientation.lock) {
+      await screen.orientation.lock('landscape');
+    }
+  } catch (e) {
+    // Many browsers reject this outside fullscreen; ignore silently
+  }
+}
+
+// ===== Device orientation (gyro) =====
+function requestOrientation() {
+  // iOS 13+ requires explicit permission
+  if (typeof DeviceOrientationEvent !== 'undefined' &&
+      typeof DeviceOrientationEvent.requestPermission === 'function') {
+    DeviceOrientationEvent.requestPermission()
+      .then(r => { if (r === 'granted') attachOrientation(); })
+      .catch(() => {});
+  } else {
+    attachOrientation();
+  }
+}
+
+function attachOrientation() {
+  window.addEventListener('deviceorientation', onOrient);
+}
+
+function onOrient(e) {
+  if (!currentGuide) return;
+  // deviceorientation axes are fixed to the device, not the screen — when the
+  // user rotates to landscape, horizon tilt moves from gamma (roll) to beta (pitch).
+  const angle = (screen.orientation && screen.orientation.angle) || 0;
+  let tilt;
+  if (angle === 90) tilt = e.beta || 0;
+  else if (angle === 270) tilt = -(e.beta || 0);
+  else tilt = e.gamma || 0;
+  const display = Math.max(-15, Math.min(15, tilt));
+  currentTilt = display;
+  levelVal.textContent = (display >= 0 ? '+' : '') + display.toFixed(1) + '°';
+  const pct = 50 + (display / 15) * 50;
+  levelDot.style.left = Math.max(0, Math.min(100, pct)) + '%';
+  if (Math.abs(display) <= currentGuide.tiltTolerance) {
+    levelDot.classList.remove('off');
+  } else {
+    levelDot.classList.add('off');
+  }
+  if (recording) tiltSamples.push(display);
+}
+
+// ===== Recording =====
+function pickRecorderMime() {
+  const candidates = [
+    'video/mp4;codecs=avc1,mp4a',
+    'video/mp4',
+    'video/webm;codecs=vp9,opus',
+    'video/webm;codecs=vp8,opus',
+    'video/webm'
+  ];
+  for (const m of candidates) {
+    if (window.MediaRecorder && MediaRecorder.isTypeSupported(m)) return m;
+  }
+  return '';
+}
+
+function startRecording() {
+  if (!stream) return;
+  const mime = pickRecorderMime();
+  try {
+    recorder = mime ? new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8_000_000 })
+                    : new MediaRecorder(stream);
+  } catch (e) {
+    showHint('녹화 시작 실패: ' + e.message, 2400);
+    return;
+  }
+  chunks = [];
+  tiltSamples = [];
+  audioSamples = [];
+  startAudioSampling();
+  requestLocation();
+  recorder.ondataavailable = ev => { if (ev.data && ev.data.size > 0) chunks.push(ev.data); };
+  recorder.onstop = onRecordStop;
+  recorder.start();
+  recording = true;
+  recStart = Date.now();
+  shutter.classList.add('recording');
+  recInfo.classList.add('on');
+  updateRecTime();
+  recInterval = setInterval(updateRecTime, 100);
+}
+
+function updateRecTime() {
+  const elapsed = (Date.now() - recStart) / 1000;
+  const remaining = Math.max(0, RECORD_SECONDS - elapsed);
+  const e = elapsed.toFixed(1).padStart(4, '0');
+  recTime.textContent = e + ' / ' + RECORD_SECONDS.toFixed(1);
+  if (elapsed >= RECORD_SECONDS) stopRecording('auto_completed');
+}
+
+function stopRecording(reason = 'auto_completed') {
+  if (!recorder || !recording) return;
+  recording = false;
+  lastRecDurationSec = (Date.now() - recStart) / 1000;
+  lastStopReason = reason;
+  shotIndex++;
+  clearInterval(recInterval);
+  stopAudioSampling();
+  try { recorder.stop(); } catch (e) {}
+  shutter.classList.remove('recording');
+  recInfo.classList.remove('on');
+}
+
+function onRecordStop() {
+  const mime = recorder.mimeType || 'video/mp4';
+  const ext = mime.includes('mp4') ? 'mp4' : 'webm';
+  const blob = new Blob(chunks, { type: mime });
+  const ts = new Date(recStart);
+  const pad = n => String(n).padStart(2, '0');
+  const stamp = ts.getFullYear() + pad(ts.getMonth()+1) + pad(ts.getDate()) + 'T' +
+                pad(ts.getHours()) + pad(ts.getMinutes()) + pad(ts.getSeconds());
+  const shotId = currentType + '_' + currentDistrict + '_' + stamp;
+  const videoName = shotId + '.' + ext;
+
+  const sidecar = buildSidecar({
+    shotId,
+    videoFilename: videoName,
+    mimeType: mime,
+    durationSec: lastRecDurationSec,
+    stoppedReason: lastStopReason
+  });
+  saveShot(shotId, videoName, blob, sidecar).then(ok => {
+    if (ok) showHint('앱에 저장됨 · 우측 상단 "내보내기"로 파일 추출', 4000);
+    else fallbackDownload(videoName, blob, sidecar);
+  });
+}
+
+// ===== Photo capture =====
+function flashShutter() {
+  const f = document.getElementById('flash');
+  f.classList.remove('on');
+  void f.offsetWidth; // restart animation
+  f.classList.add('on');
+}
+
+function capturePhoto() {
+  if (!stream || !video.videoWidth) {
+    showHint('카메라 준비 중입니다', 1500);
+    return;
+  }
+  requestLocation();
+  const capturedAt = new Date();
+  const canvas = document.createElement('canvas');
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  flashShutter();
+
+  canvas.toBlob(blob => {
+    if (!blob) { showHint('사진 캡처 실패', 2400); return; }
+    shotIndex++;
+    const ts = capturedAt;
+    const pad = n => String(n).padStart(2, '0');
+    const stamp = ts.getFullYear() + pad(ts.getMonth()+1) + pad(ts.getDate()) + 'T' +
+                  pad(ts.getHours()) + pad(ts.getMinutes()) + pad(ts.getSeconds());
+    const shotId = currentType + '_' + currentDistrict + '_' + stamp;
+    const photoName = shotId + '.jpg';
+
+    const sidecar = buildPhotoSidecar({
+      shotId,
+      photoFilename: photoName,
+      capturedAt,
+      width: canvas.width,
+      height: canvas.height
+    });
+    saveShot(shotId, photoName, blob, sidecar).then(ok => {
+      if (ok) showHint('앱에 저장됨 · 우측 상단 "내보내기"로 파일 추출', 4000);
+      else fallbackDownload(photoName, blob, sidecar);
+    });
+  }, 'image/jpeg', 0.95);
+}
+
+function buildPhotoSidecar({ shotId, photoFilename, capturedAt, width, height }) {
+  const typeSpec = GUIDE_TYPES[currentType];
+  const districtSpec = DISTRICTS[currentDistrict];
+  const aspect = ASPECT_MASKS[typeSpec.aspectMask];
+  const round1 = n => Math.round(n * 10) / 10;
+
+  let tilt;
+  if (currentTilt === null) {
+    tilt = { tolerance_deg: typeSpec.tiltTolerance, current_deg: null, in_range: null };
+  } else {
+    tilt = {
+      tolerance_deg: typeSpec.tiltTolerance,
+      current_deg: round1(currentTilt),
+      in_range: Math.abs(currentTilt) <= typeSpec.tiltTolerance
+    };
+  }
+
+  return {
+    shot_id: shotId,
+    capture_mode: 'photo',
+    type: { id: typeSpec.id, name: typeSpec.name, subtitle: typeSpec.subtitle },
+    district: { id: districtSpec.id, name: districtSpec.name },
+    photo: {
+      filename: photoFilename,
+      mime_type: 'image/jpeg',
+      captured_at_local: isoLocal(capturedAt),
+      captured_at_utc: isoUtc(capturedAt),
+      aspect_ratio_native: '16:9',
+      aspect_ratio_intent: aspect.ratio + ':1',
+      resolution: width + 'x' + height
+    },
+    camera: getCameraInfo(),
+    location: currentLocation,
+    sun: currentLocation ? calculateSunPosition(currentLocation.latitude, currentLocation.longitude, capturedAt) : null,
+    tilt: tilt,
+    device: deviceInfo,
+    session: {
+      session_id: sessionId,
+      shot_index: shotIndex,
+      total_shots_in_session: shotIndex
+    },
+    app_version: APP_VERSION
+  };
+}
+
+// ===== Device, location, audio, sun =====
+function detectDevice() {
+  const ua = navigator.userAgent;
+  const isAndroid = /Android/i.test(ua);
+  const isIOS = /iPhone|iPad|iPod/i.test(ua);
+
+  let platform = 'unknown';
+  let osVersion = null;
+  let modelHint = null;
+  let browser = null;
+
+  if (isAndroid) {
+    platform = 'Android';
+    const m = ua.match(/Android\s+([\d.]+)/);
+    if (m) osVersion = 'Android ' + m[1];
+    const patterns = [/;\s*(SM-[A-Z0-9]+)/, /;\s*(Pixel\s+\d+\w*)/, /;\s*([^;)]+?)\s+Build\//];
+    for (const p of patterns) {
+      const mm = ua.match(p);
+      if (mm) { modelHint = mm[1].trim(); break; }
+    }
+  } else if (isIOS) {
+    platform = 'iOS';
+    const m = ua.match(/OS\s+([\d_]+)/);
+    if (m) osVersion = 'iOS ' + m[1].replace(/_/g, '.');
+    if (/iPhone/.test(ua)) modelHint = 'iPhone';
+    else if (/iPad/.test(ua)) modelHint = 'iPad';
+    else if (/iPod/.test(ua)) modelHint = 'iPod';
+  }
+
+  if (/Edg\//.test(ua)) {
+    const m = ua.match(/Edg\/(\d+)/);
+    if (m) browser = 'Edge ' + m[1];
+  } else if (/Chrome\//.test(ua)) {
+    const m = ua.match(/Chrome\/(\d+)/);
+    if (m) browser = 'Chrome ' + m[1];
+  } else if (/Firefox\//.test(ua)) {
+    const m = ua.match(/Firefox\/(\d+)/);
+    if (m) browser = 'Firefox ' + m[1];
+  } else if (/Safari\//.test(ua)) {
+    const m = ua.match(/Version\/(\d+)/);
+    if (m) browser = 'Safari ' + m[1];
+  }
+
+  return {
+    user_agent: ua,
+    model_hint: modelHint,
+    platform: platform,
+    os_version: osVersion,
+    browser: browser,
+    screen: {
+      width: screen.width,
+      height: screen.height,
+      device_pixel_ratio: window.devicePixelRatio
+    }
+  };
+}
+
+const deviceInfo = detectDevice();
+
+function requestLocation() {
+  return new Promise(resolve => {
+    if (!navigator.geolocation) {
+      resolve(null);
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        currentLocation = {
+          latitude: pos.coords.latitude,
+          longitude: pos.coords.longitude,
+          accuracy_m: Math.round(pos.coords.accuracy),
+          captured_at: isoLocal(new Date(pos.timestamp))
+        };
+        locationStatus = 'available';
+        updateGpsIndicator();
+        resolve(currentLocation);
+      },
+      err => {
+        if (err.code === 1) {
+          locationStatus = 'denied';
+          if (!gpsHintShown) {
+            showHint('위치 권한 거부됨 — GPS 좌표는 기록되지 않습니다', 4000);
+            gpsHintShown = true;
+          }
+        } else if (locationStatus === 'unknown') {
+          locationStatus = 'unavailable';
+        }
+        updateGpsIndicator();
+        resolve(null);
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+    );
+  });
+}
+
+function updateGpsIndicator() {
+  const ind = document.getElementById('gps-indicator');
+  if (!ind) return;
+  if (currentLocation) {
+    ind.textContent = 'GPS ✓';
+    ind.classList.add('ok');
+    ind.classList.remove('fail');
+  } else {
+    ind.textContent = 'GPS ✗';
+    ind.classList.add('fail');
+    ind.classList.remove('ok');
+  }
+}
+
+async function setupAudioAnalysis() {
+  if (!stream) return;
+  if (stream.getAudioTracks().length === 0) return;
+  try {
+    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioContext.state === 'suspended') {
+      try { await audioContext.resume(); } catch (e) {}
+    }
+    audioSource = audioContext.createMediaStreamSource(stream);
+    analyser = audioContext.createAnalyser();
+    analyser.fftSize = 2048;
+    audioSource.connect(analyser);
+  } catch (e) {
+    audioContext = null;
+    analyser = null;
+  }
+}
+
+function startAudioSampling() {
+  if (!analyser) return;
+  const buffer = new Float32Array(analyser.fftSize);
+  audioInterval = setInterval(() => {
+    analyser.getFloatTimeDomainData(buffer);
+    let sumSq = 0;
+    for (let i = 0; i < buffer.length; i++) sumSq += buffer[i] * buffer[i];
+    const rms = Math.sqrt(sumSq / buffer.length);
+    const db = rms > 0 ? Math.max(-100, 20 * Math.log10(rms)) : -100;
+    audioSamples.push(db);
+  }, 100);
+}
+
+function stopAudioSampling() {
+  if (audioInterval) {
+    clearInterval(audioInterval);
+    audioInterval = null;
+  }
+}
+
+function getAudioStats() {
+  if (audioSamples.length === 0) return null;
+  const sum = audioSamples.reduce((a, b) => a + b, 0);
+  const round1 = n => Math.round(n * 10) / 10;
+  return {
+    avg_db: round1(sum / audioSamples.length),
+    peak_db: round1(Math.max(...audioSamples)),
+    samples_count: audioSamples.length
+  };
+}
+
+function getCameraInfo() {
+  if (!stream) return null;
+  const tracks = stream.getVideoTracks();
+  if (tracks.length === 0) return null;
+  const track = tracks[0];
+  const settings = track.getSettings();
+  return {
+    actual_width: settings.width || null,
+    actual_height: settings.height || null,
+    actual_fps: settings.frameRate ? Math.round(settings.frameRate) : null,
+    facing_mode: settings.facingMode || null,
+    device_label: track.label || null
+  };
+}
+
+function calculateSunPosition(lat, lng, date) {
+  const rad = Math.PI / 180;
+  const dayOfYear = Math.floor((date - new Date(date.getFullYear(), 0, 0)) / 86400000);
+  const decl = 23.45 * Math.sin(rad * (360 / 365) * (dayOfYear - 81));
+  const hourUTC = date.getUTCHours() + date.getUTCMinutes() / 60;
+  const localSolarTime = hourUTC + lng / 15;
+  const hourAngle = (localSolarTime - 12) * 15;
+  const altitude = Math.asin(
+    Math.sin(decl * rad) * Math.sin(lat * rad) +
+    Math.cos(decl * rad) * Math.cos(lat * rad) * Math.cos(hourAngle * rad)
+  ) / rad;
+  const azimuth = Math.atan2(
+    -Math.cos(decl * rad) * Math.sin(hourAngle * rad),
+    Math.sin(decl * rad) * Math.cos(lat * rad) - Math.cos(decl * rad) * Math.sin(lat * rad) * Math.cos(hourAngle * rad)
+  ) / rad;
+  return {
+    altitude_deg: Math.round(altitude * 10) / 10,
+    azimuth_deg: Math.round(((azimuth + 360) % 360) * 10) / 10
+  };
+}
+
+// ===== Sidecar metadata =====
+function isoLocal(date) {
+  const pad = n => String(n).padStart(2, '0');
+  const tzMin = -date.getTimezoneOffset();
+  const tzSign = tzMin >= 0 ? '+' : '-';
+  const tzH = pad(Math.floor(Math.abs(tzMin) / 60));
+  const tzM = pad(Math.abs(tzMin) % 60);
+  return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate()) +
+    'T' + pad(date.getHours()) + ':' + pad(date.getMinutes()) + ':' + pad(date.getSeconds()) +
+    tzSign + tzH + ':' + tzM;
+}
+
+function isoUtc(date) {
+  return date.toISOString().replace(/\.\d{3}Z$/, 'Z');
+}
+
+function buildSidecar({ shotId, videoFilename, mimeType, durationSec, stoppedReason }) {
+  const startDate = new Date(recStart);
+  const typeSpec = GUIDE_TYPES[currentType];
+  const districtSpec = DISTRICTS[currentDistrict];
+  const aspect = ASPECT_MASKS[typeSpec.aspectMask];
+  const round1 = n => Math.round(n * 10) / 10;
+
+  let tilt;
+  if (tiltSamples.length === 0) {
+    tilt = {
+      tolerance_deg: typeSpec.tiltTolerance,
+      min_deg: null,
+      max_deg: null,
+      avg_deg: null,
+      in_range_pct: null
+    };
+  } else {
+    const sum = tiltSamples.reduce((a, b) => a + b, 0);
+    const inRange = tiltSamples.filter(s => Math.abs(s) <= typeSpec.tiltTolerance).length;
+    tilt = {
+      tolerance_deg: typeSpec.tiltTolerance,
+      min_deg: round1(Math.min(...tiltSamples)),
+      max_deg: round1(Math.max(...tiltSamples)),
+      avg_deg: round1(sum / tiltSamples.length),
+      in_range_pct: Math.round((inRange / tiltSamples.length) * 100)
+    };
+  }
+
+  return {
+    shot_id: shotId,
+    capture_mode: 'video',
+    type: { id: typeSpec.id, name: typeSpec.name, subtitle: typeSpec.subtitle },
+    district: { id: districtSpec.id, name: districtSpec.name },
+    recording: {
+      started_at_local: isoLocal(startDate),
+      started_at_utc: isoUtc(startDate),
+      duration_target_sec: RECORD_SECONDS,
+      duration_actual_sec: round1(durationSec),
+      stopped_reason: stoppedReason
+    },
+    video: {
+      filename: videoFilename,
+      mime_type: mimeType,
+      aspect_ratio_native: '16:9',
+      aspect_ratio_intent: aspect.ratio + ':1',
+      resolution_target: '1920x1080'
+    },
+    camera: getCameraInfo(),
+    location: currentLocation,
+    sun: currentLocation ? calculateSunPosition(currentLocation.latitude, currentLocation.longitude, startDate) : null,
+    tilt: tilt,
+    audio: getAudioStats(),
+    device: deviceInfo,
+    session: {
+      session_id: sessionId,
+      shot_index: shotIndex,
+      total_shots_in_session: shotIndex
+    },
+    app_version: APP_VERSION
+  };
+}
+
+
+// ===== Local storage of shots (IndexedDB) =====
+// Auto-download is unreliable on Android Chrome (fullscreen + multi-file downloads
+// get silently dropped). Instead every shot is stored in the app and exported on
+// demand as a single ZIP, which saves reliably.
+let _db = null;
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open('camera-shots', 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains('shots')) {
+        db.createObjectStore('shots', { keyPath: 'key', autoIncrement: true });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function dbTx(mode, fn) {
+  const db = _db || (_db = await openDB());
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('shots', mode);
+    const store = tx.objectStore('shots');
+    let result;
+    Promise.resolve(fn(store)).then(r => { result = r; });
+    tx.oncomplete = () => resolve(result);
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
+  });
+}
+function dbAdd(record)  { return dbTx('readwrite', s => s.add(record)); }
+function dbClear()      { return dbTx('readwrite', s => s.clear()); }
+function dbGetAll()     { return dbTx('readonly',  s => new Promise(res => { const r = s.getAll();  r.onsuccess = () => res(r.result); })); }
+function dbCount()      { return dbTx('readonly',  s => new Promise(res => { const r = s.count();   r.onsuccess = () => res(r.result); })); }
+
+async function saveShot(shotId, mediaName, mediaBlob, jsonObj) {
+  const jsonBlob = new Blob([JSON.stringify(jsonObj, null, 2)], { type: 'application/json' });
+  try {
+    await dbAdd({
+      shot_id: shotId,
+      saved_at: isoLocal(new Date()),
+      files: [
+        { name: mediaName, blob: mediaBlob },
+        { name: shotId + '.json', blob: jsonBlob }
+      ]
+    });
+    await updateExportBadge();
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+async function updateExportBadge() {
+  let n = 0;
+  try { n = await dbCount(); } catch (e) {}
+  const c = document.getElementById('export-count');
+  if (c) c.textContent = n;
+}
+
+// Last-resort path if IndexedDB itself fails: old direct-download behavior.
+function fallbackDownload(name, blob, jsonObj) {
+  const dl = (b, fn) => {
+    const url = URL.createObjectURL(b);
+    const a = document.createElement('a');
+    a.href = url; a.download = fn;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  };
+  dl(blob, name);
+  dl(new Blob([JSON.stringify(jsonObj, null, 2)], { type: 'application/json' }), name.replace(/\.[^.]+$/, '') + '.json');
+  showHint('앱 저장 실패 — 다운로드로 대체 시도됨', 3000);
+}
+
+// ===== ZIP (store / no compression, binary-safe) =====
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+function crc32(u8) {
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < u8.length; i++) c = CRC_TABLE[(c ^ u8[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+async function makeZip(files) {
+  const enc = new TextEncoder();
+  const parts = [], central = [];
+  let offset = 0;
+  for (const f of files) {
+    const nameBytes = enc.encode(f.name);
+    const data = new Uint8Array(await f.blob.arrayBuffer());
+    const crc = crc32(data);
+    const lh = new Uint8Array(30 + nameBytes.length);
+    const lv = new DataView(lh.buffer);
+    lv.setUint32(0, 0x04034b50, true);
+    lv.setUint16(4, 20, true);
+    lv.setUint16(6, 0x0800, true);   // UTF-8 filename flag
+    lv.setUint16(8, 0, true);        // store
+    lv.setUint32(14, crc, true);
+    lv.setUint32(18, data.length, true);
+    lv.setUint32(22, data.length, true);
+    lv.setUint16(26, nameBytes.length, true);
+    lh.set(nameBytes, 30);
+    parts.push(lh, data);
+
+    const ch = new Uint8Array(46 + nameBytes.length);
+    const cv = new DataView(ch.buffer);
+    cv.setUint32(0, 0x02014b50, true);
+    cv.setUint16(4, 20, true);
+    cv.setUint16(6, 20, true);
+    cv.setUint16(8, 0x0800, true);
+    cv.setUint32(16, crc, true);
+    cv.setUint32(20, data.length, true);
+    cv.setUint32(24, data.length, true);
+    cv.setUint16(28, nameBytes.length, true);
+    cv.setUint32(42, offset, true);
+    ch.set(nameBytes, 46);
+    central.push(ch);
+    offset += lh.length + data.length;
+  }
+  const centralSize = central.reduce((s, c) => s + c.length, 0);
+  const end = new Uint8Array(22);
+  const ev = new DataView(end.buffer);
+  ev.setUint32(0, 0x06054b50, true);
+  ev.setUint16(8, files.length, true);
+  ev.setUint16(10, files.length, true);
+  ev.setUint32(12, centralSize, true);
+  ev.setUint32(16, offset, true);
+  parts.push(...central, end);
+  return new Blob(parts, { type: 'application/zip' });
+}
+
+let exporting = false;
+async function exportAll() {
+  if (exporting) return;
+  let shots;
+  try { shots = await dbGetAll(); } catch (e) { showHint('보관함 읽기 실패', 2400); return; }
+  if (!shots || shots.length === 0) { showHint('내보낼 사진이 없습니다', 2000); return; }
+  exporting = true;
+  showHint('내보내기 준비 중… (' + shots.length + '건)', 2000);
+  try {
+    const files = [];
+    for (const s of shots) for (const f of s.files) files.push(f);
+    const zipBlob = await makeZip(files);
+    const ts = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    const stamp = ts.getFullYear() + pad(ts.getMonth()+1) + pad(ts.getDate()) + 'T' +
+                  pad(ts.getHours()) + pad(ts.getMinutes()) + pad(ts.getSeconds());
+    const zipName = 'camera_export_' + shots.length + 'shots_' + stamp + '.zip';
+
+    // Prefer the native share sheet (lets you save to Files/Drive even in fullscreen);
+    // fall back to a single file download.
+    let handled = false;
+    try {
+      const file = new File([zipBlob], zipName, { type: 'application/zip' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: zipName });
+        handled = true;
+      }
+    } catch (e) {
+      if (e && e.name === 'AbortError') handled = true; // user cancelled — don't double-save
+    }
+    if (!handled) {
+      const url = URL.createObjectURL(zipBlob);
+      const a = document.createElement('a');
+      a.href = url; a.download = zipName;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 15000);
+    }
+
+    setTimeout(() => {
+      if (confirm('내보내기 완료 (' + shots.length + '건).\n저장/공유가 끝난 걸 확인했다면 앱 보관함을 비울까요?')) {
+        dbClear().then(updateExportBadge);
+      }
+    }, 700);
+  } catch (e) {
+    showHint('내보내기 실패: ' + (e.message || e.name), 3500);
+  } finally {
+    exporting = false;
+  }
+}
+
+// ===== Wire up =====
+startBtn.addEventListener('click', startCamera);
+document.getElementById('btn-export').addEventListener('click', exportAll);
+updateExportBadge();
+shutter.addEventListener('click', () => {
+  if (captureMode === 'photo') {
+    capturePhoto();
+    return;
+  }
+  if (recording) stopRecording('user_stopped');
+  else startRecording();
+});
+
+// Capture mode toggle (video / photo)
+document.querySelectorAll('.mode-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    if (recording) { showHint('녹화 중에는 모드를 바꿀 수 없습니다', 1800); return; }
+    captureMode = btn.dataset.mode;
+    document.querySelectorAll('.mode-btn').forEach(b => b.classList.toggle('active', b === btn));
+  });
+});
+
+// Tap-to-focus / lock hint (informational only — actual camera focus lock varies by device)
+video.addEventListener('click', () => {
+  showHint('초점 고정은 기본 카메라 앱에서 길게 탭으로 가능합니다', 2400);
+});
+
+document.addEventListener('fullscreenchange', () => {
+  if (document.fullscreenElement) {
+    btnFullscreen.style.display = 'none';
+  } else {
+    btnFullscreen.style.display = 'flex';
+    showHint('전체화면 복귀 ↗', 2400);
+  }
+});
+
+btnFullscreen.addEventListener('click', async () => {
+  await requestFullscreenSafe();
+  lockOrientationLandscape();
+});
+
+window.addEventListener('beforeunload', (e) => {
+  if (recording) {
+    e.preventDefault();
+    e.returnValue = '녹화 중입니다. 정말 나가시겠습니까?';
+    return e.returnValue;
+  }
+});
+
+function onPopState() {
+  if (recording) {
+    stopRecording('back_button');
+    showHint('녹화 중지됨. 다시 뒤로가기를 누르면 종료됩니다', 3000);
+  }
+  history.pushState({trap: true}, '');
+}
+
+document.getElementById('btn-back-to-types').addEventListener('click', () => {
+  showScreen('type-select');
+});
+
+document.getElementById('type-pill').addEventListener('click', () => {
+  if (recording) stopRecording('user_stopped');
+  showScreen('type-select');
+});
+
+buildTypeCards();
+buildDistrictCards();
+</script>
+
+</body>
+</html>
