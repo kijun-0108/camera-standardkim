@@ -1204,9 +1204,11 @@ async function exportAll() {
     for (const s of shots) for (const f of s.files) files.push(f);
 
     // Best path (desktop Chrome / supported browsers): write each photo + metadata
-    // individually into a real folder the user picks. Android Chrome does NOT support
-    // this API, so it falls through to the folder-structured ZIP below.
-    if (window.showDirectoryPicker) {
+    // individually into a real folder the user picks. Mobile browsers either lack this
+    // API or expose a broken stub that aborts immediately, so restrict it to desktop and
+    // let phones fall through to the folder-structured ZIP below.
+    const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+    if (window.showDirectoryPicker && !isMobile) {
       let dir = null;
       try {
         dir = await window.showDirectoryPicker({ mode: 'readwrite' });
